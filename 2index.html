@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Soma Channel Calendar</title>
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script&display=swap" rel="stylesheet">
+<style>
+body { font-family: sans-serif; padding: 20px; }
+.logo { font-family: 'Dancing Script', cursive; font-size: 3em; color: #333; margin-bottom: 5px; }
+.container { display: flex; gap: 20px; align-items: flex-start; }
+#calendar { flex: 3; min-width: 300px; }
+.rightColumn { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 20px; }
+#selectedDay, #anniversary, #allTimeRanking { background: #fafafa; padding: 10px; border-radius: 8px; max-height: 45vh; overflow-y: auto; }
+#selectedVideos, #anniversaryVideos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+#selectedVideos .video, #anniversaryVideos .video { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+table { border-collapse: collapse; margin-top: 10px; width:100%; table-layout: fixed; }
+th { height: 30px; font-weight: normal; }
+th:nth-child(1) { color: red; font-weight: bold; }
+th:nth-child(7) { color: blue; font-weight: bold; }
+td { border: 1px solid #ccc; width: 14.28%; height: 150px; vertical-align: top; padding: 2px; text-align: center; cursor: pointer; box-sizing: border-box; }
+.calendar-video-container { display: flex; flex-direction: column; max-height: 120px; overflow-y: auto; width: 100%; }
+.calendar-video-container .video { display: flex; flex-direction: column; align-items: center; }
+.calendar-video-container .video img { width: 100%; height: auto; max-height: 50px; object-fit: cover; border-radius: 6px; }
+.video span { font-size: 12px; text-align: center; }
+td.highlight { border: 2px solid #ff8c00; }
+.header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+.monthNav { margin: 0 2px; padding: 5px 12px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); transition: 0.3s; }
+.monthNav:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+.stats { font-size:12px; display:flex; justify-content:space-around; margin-top:3px; }
+.stats span { display:flex; align-items:center; gap:3px; }
+#allTimeRanking button { margin-top:5px; padding:5px 10px; border-radius:6px; border:none; background:#ff5722; color:white; cursor:pointer; font-weight:bold; }
+#allTimeRanking button:hover { background:#e64a19; }
+</style>
+</head>
+<body>
+<h1 class="logo">Soma Channel Calendar</h1>
+<p style="font-size: 0.9em; color: #555; margin-top: 5px;">
+サムネイルをクリックで、Youtubeサイトへ移動します。<br>
+黄色の日付の場合、過去のその日に投稿された動画が存在します。
+</p>
+
+<div class="container">
+  <div>
+    <div id="calendar"></div>
+  </div>
+  <div class="rightColumn">
+    <div id="selectedDay">
+      <h3>選択した日の動画（過去含む） (0件)</h3>
+      <div id="selectedVideos"></div>
+    </div>
+    <div id="anniversary">
+      <h3>過去の今日の動画 (0件)</h3>
+      <div id="anniversaryVideos"></div>
+    </div>
+    <div id="allTimeRanking">
+      <h3>全動画再生数ランキング</h3>
+      <button id="showRankingBtn" onclick="loadAllTimeRanking()">ランキング表示</button>
+      <ol id="rankingList"></ol>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_KEY = 'AIzaSyDU8UH7nElrdByWbH6nnqRHSM-WFLCvhOw';
+const channelId = 'UCpJnqI7tiz-Tr-UNDmfSmAQ';
+let uploadsPlaylistId = '';
+let videos = [];
+let monthsKeys = [];
+let currentMonthIndex = 0;
+
+const calendarDiv = document.getElementById('calendar');
+
+// 動画取得
+async function fetchUploadsPlaylistId() {
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${API_KEY}`);
+  const data = await res.json();
+  uploadsPlaylistId = data.items[0].contentDetails.relatedPlaylists.uploads;
+}
+
+async function fetchAllVideos() {
+  let nextPageToken = '';
+  try {
+    do {
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?key=${API_KEY}&playlistId=${uploadsPlaylistId}&part=snippet,contentDetails&maxResults=50&pageToken=${nextPageToken}`);
+      const data = await res.json();
+      data.items.forEach(item => {
+        const v = item.snippet;
+        const publishedAt = v.publishedAt || item.contentDetails.videoPublishedAt;
+        videos.push({ id: item.contentDetails.videoId, title: v.title, date: publishedAt, url: 'https://www.youtube.com/watch?v=' + v.resourceId.videoId, thumbnail: v.thumbnails.medium.url });
+      });
+      nextPageToken = data.nextPageToken || '';
+    } while(nextPageToken);
+  } catch(e) {
+    console.error(e);
+    calendarDiv.innerHTML = '取得に失敗しました<br>APIキーやチャンネルIDを確認してください。';
+  }
+}
+
+// 月のセットアップ
+function setupMonths() {
+  const start = new Date(2019,0,1);
+  const end = new Date();
+  const months = [];
+  let d = new Date(start.getFullYear(), start.getMonth(), 1);
+  while(d <= end){
+    months.push(`${d.getFullYear()}-${d.getMonth()+1}`);
+    d.setMonth(d.getMonth()+1);
+  }
+  monthsKeys = months;
+  const now = new Date();
+  const thisMonthKey = `${now.getFullYear()}-${now.getMonth()+1}`;
+  currentMonthIndex = monthsKeys.indexOf(thisMonthKey);
+}
+
+// カレンダー描画
+function displayMonth() {
+  const monthKey = monthsKeys[currentMonthIndex];
+  const [year, month] = monthKey.split('-').map(Number);
+  const firstDay = new Date(year, month-1, 1);
+  const lastDay = new Date(year, month, 0);
+  const videosThisMonth = videos.filter(v => {
+    const d = new Date(v.date);
+    return d.getFullYear() === year && d.getMonth() === (month-1);
+  });
+  const todayDate = new Date();
+  let navHtml = '';
+  if(currentMonthIndex>0) navHtml+=`<button class="monthNav" onclick="changeMonth(-1)">◀ 前の月</button>`;
+  if(currentMonthIndex<monthsKeys.length-1) navHtml+=`<button class="monthNav" onclick="changeMonth(1)">次の月 ▶</button>`;
+  let html = `<div class="header-container"><h2 class="header">${year}年 ${month}月</h2><div>${navHtml}</div></div><table><tr>`;
+  const daysOfWeek=['日','月','火','水','木','金','土'];
+  for(const d of daysOfWeek) html+=`<th>${d}</th>`;
+  html+='</tr><tr>';
+  for(let i=0;i<firstDay.getDay();i++) html+='<td></td>';
+  for(let day=1; day<=lastDay.getDate(); day++){
+    const videoList = videosThisMonth.filter(v => new Date(v.date).getDate() === day);
+    const hasAnniversary = videos.some(v => { const d = new Date(v.date); return d.getMonth() === month-1 && d.getDate() === day; });
+    const isToday = (year===todayDate.getFullYear() && month===todayDate.getMonth()+1 && day===todayDate.getDate());
+    let dayHtml = hasAnniversary ? `<span style="color:yellow;font-weight:bold">${day}</span>` : day;
+    html += `<td data-day="${day}" style="vertical-align: top; ${isToday?'background-color:#d0f0ff;':''}">`;
+    html += `<strong>${dayHtml}</strong><br>`;
+    if(videoList.length){
+      html += `<div class="calendar-video-container">`;
+      videoList.forEach(v=>{
+        html += `<div class="video" data-url="${v.url}">
+          <img src="${v.thumbnail}">
+          <span>${v.title}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+    html += `</td>`;
+    if((firstDay.getDay()+day)%7===0) html+='</tr><tr>';
+  }
+  html += '</tr></table>';
+  calendarDiv.innerHTML = html;
+
+  // 日付クリックイベントを後付け
+  document.querySelectorAll('#calendar td').forEach(td=>{
+    td.addEventListener('click',()=>{
+      const day = parseInt(td.getAttribute('data-day'));
+      if(day) highlightAnniversary(year, month, day);
+    });
+  });
+}
+
+// 月移動
+function changeMonth(delta){ currentMonthIndex+=delta; if(currentMonthIndex<0) currentMonthIndex=0; if(currentMonthIndex>=monthsKeys.length) currentMonthIndex=monthsKeys.length-1; displayMonth(); }
+
+// 選択日動画表示
+async function highlightAnniversary(year, month, day){
+  const selectedContainer=document.getElementById('selectedVideos');
+  const header=document.querySelector('#selectedDay h3');
+  const filtered=videos.filter(v=>{ const d=new Date(v.date); return (d.getMonth()+1)===month && d.getDate()===day; });
+  header.textContent = `選択した日の動画（過去含む） (${filtered.length}件)`;
+  if(filtered.length===0){ selectedContainer.innerHTML='<p>該当なし</p>'; return; }
+  const ids = filtered.map(v=>v.id).join(',');
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${ids}&key=${API_KEY}`);
+  const data = await res.json();
+  const statsMap = {};
+  data.items.forEach(item=>{ statsMap[item.id]={ viewCount:item.statistics.viewCount, likeCount:item.statistics.likeCount }; });
+  filtered.forEach(v=>{ v.viewCount = statsMap[v.id]?.viewCount; v.likeCount = statsMap[v.id]?.likeCount; });
+  selectedContainer.innerHTML = filtered.map(v=>`
+    <div class="video" onclick="window.open('${v.url}','_blank')">
+      <img src="${v.thumbnail}">
+      <span>${v.title}</span>
+      <div class="stats">
+        <span>👁 ${v.viewCount?.toLocaleString()||'-'}</span>
+        <span>👍 ${v.likeCount?.toLocaleString()||'-'}</span>
+      </div>
+    </div>`).join('');
+}
+
+// 過去の今日の動画
+function renderAnniversaryAll(){
+  const today = new Date();
+  const month = today.getMonth();
+  const date = today.getDate();
+  const container = document.getElementById('anniversaryVideos');
+  const header=document.querySelector('#anniversary h3');
+  const filtered = videos.filter(v=>{ const d=new Date(v.date); return d.getMonth()===month && d.getDate()===date; });
+  header.textContent = `過去の今日の動画 (${filtered.length}件)`;
+  if(filtered.length===0){ container.innerHTML='<p>該当なし</p>'; return; }
+  container.innerHTML = filtered.map(v=>`
+    <div class="video" onclick="window.open('${v.url}','_blank')">
+      <strong>${new Date(v.date).getFullYear()}年</strong><br>
+      <img src="${v.thumbnail}">
+      <span>${v.title}</span>
+    </div>`).join('');
+}
+
+// 全動画ランキング（ボタン押下時のみ）
+let rankingLoaded = false;
+async function loadAllTimeRanking(){
+  if(rankingLoaded) return;
+  rankingLoaded = true;
+  const btn = document.getElementById('showRankingBtn');
+  btn.disabled = true;
+  btn.textContent = '読み込み中...';
+  const container = document.getElementById('rankingList');
+  const allStats = [];
+  const chunks = [];
+  for(let i=0;i<videos.length;i+=50) chunks.push(videos.slice(i,i+50).map(v=>v.id));
+  for(const chunk of chunks){
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${chunk.join(',')}&key=${API_KEY}`);
+    const data = await res.json();
+    data.items.forEach(item=>{
+      const vid = videos.find(v=>v.id===item.id);
+      if(vid) allStats.push({...vid, viewCount:parseInt(item.statistics.viewCount||0)});
+    });
+  }
+  allStats.sort((a,b)=>b.viewCount - a.viewCount);
+  const top5 = allStats.slice(0,5);
+  container.innerHTML = top5.map(v=>`<li><a href="${v.url}" target="_blank">${v.title}</a> 👁 ${v.viewCount.toLocaleString()}</li>`).join('');
+  btn.textContent = 'ランキング表示';
+}
+
+// 初期化
+window.onload = async()=>{
+  calendarDiv.innerHTML='読み込み中...';
+  await fetchUploadsPlaylistId();
+  await fetchAllVideos();
+  setupMonths();
+  displayMonth();
+  renderAnniversaryAll();
+};
+</script>
+</body>
+</html>
+
